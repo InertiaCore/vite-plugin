@@ -196,7 +196,7 @@ function resolveInertiaCorePlugin(pluginConfig: Required<PluginConfig>): Inertia
         configureServer(server) {
             const envDir = resolvedConfig.envDir || process.cwd()
             const envAppUrl = loadEnv(resolvedConfig.mode, envDir, 'APP_URL').APP_URL
-            const appUrl = envAppUrl ?? getAppUrlFromAppSettings()
+            const appUrl = envAppUrl ?? getAppUrlFromLaunchSettings() ?? getAppUrlFromAppSettings()
 
             server.httpServer?.once('listening', () => {
                 const address = server.httpServer?.address()
@@ -372,6 +372,52 @@ function pluginVersion(): string {
     } catch {
         return ''
     }
+}
+
+/**
+ * Get the application URL from Properties/launchSettings.json.
+ */
+function getAppUrlFromLaunchSettings(): string | null {
+    const launchSettingsPath = '../Properties/launchSettings.json'
+
+    try {
+        if (fs.existsSync(launchSettingsPath)) {
+            const content = JSON.parse(fs.readFileSync(launchSettingsPath, 'utf8'))
+
+            // First try to get from profiles (prefer Project profile over IIS Express)
+            if (content.profiles) {
+                // Look for a Project profile first
+                for (const [, profile] of Object.entries(content.profiles)) {
+                    if (profile && typeof profile === 'object' && 'commandName' in profile && profile.commandName === 'Project') {
+                        if ('applicationUrl' in profile && typeof profile.applicationUrl === 'string') {
+                            // applicationUrl can be semicolon-separated, take the first HTTPS URL, or fallback to first URL
+                            const urls = profile.applicationUrl.split(';').map((url: string) => url.trim())
+                            const httpsUrl = urls.find((url: string) => url.startsWith('https://'))
+                            return httpsUrl ?? urls[0]
+                        }
+                    }
+                }
+
+                // Fallback to any profile with applicationUrl
+                for (const [, profile] of Object.entries(content.profiles)) {
+                    if (profile && typeof profile === 'object' && 'applicationUrl' in profile && typeof profile.applicationUrl === 'string') {
+                        const urls = profile.applicationUrl.split(';').map((url: string) => url.trim())
+                        const httpsUrl = urls.find((url: string) => url.startsWith('https://'))
+                        return httpsUrl ?? urls[0]
+                    }
+                }
+            }
+
+            // Fallback to IIS Express settings
+            if (content.iisSettings?.iisExpress?.applicationUrl) {
+                return content.iisSettings.iisExpress.applicationUrl
+            }
+        }
+    } catch {
+        // Continue to next fallback if parsing fails
+    }
+
+    return null
 }
 
 /**
