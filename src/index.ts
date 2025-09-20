@@ -440,7 +440,10 @@ function getAppUrlFromLaunchSettings(): string | null {
 
     try {
         if (fs.existsSync(launchSettingsPath)) {
-            const content = JSON.parse(fs.readFileSync(launchSettingsPath, 'utf8'))
+            const rawContent = fs.readFileSync(launchSettingsPath, 'utf8')
+            // Remove BOM if present
+            const cleanContent = rawContent.replace(/^\uFEFF/, '')
+            const content = JSON.parse(cleanContent)
 
             // First try to get from profiles (prefer Project profile over IIS Express)
             if (content.profiles) {
@@ -448,10 +451,9 @@ function getAppUrlFromLaunchSettings(): string | null {
                 for (const [, profile] of Object.entries(content.profiles)) {
                     if (profile && typeof profile === 'object' && 'commandName' in profile && profile.commandName === 'Project') {
                         if ('applicationUrl' in profile && typeof profile.applicationUrl === 'string') {
-                            // applicationUrl can be semicolon-separated, take the first HTTPS URL, or fallback to first URL
+                            // applicationUrl can be semicolon-separated, return all URLs
                             const urls = profile.applicationUrl.split(';').map((url: string) => url.trim())
-                            const httpsUrl = urls.find((url: string) => url.startsWith('https://'))
-                            return httpsUrl ?? urls[0]
+                            return urls.join(' | ')
                         }
                     }
                 }
@@ -460,8 +462,7 @@ function getAppUrlFromLaunchSettings(): string | null {
                 for (const [, profile] of Object.entries(content.profiles)) {
                     if (profile && typeof profile === 'object' && 'applicationUrl' in profile && typeof profile.applicationUrl === 'string') {
                         const urls = profile.applicationUrl.split(';').map((url: string) => url.trim())
-                        const httpsUrl = urls.find((url: string) => url.startsWith('https://'))
-                        return httpsUrl ?? urls[0]
+                        return urls.join(';')
                     }
                 }
             }
