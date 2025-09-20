@@ -3,6 +3,7 @@ import { AddressInfo } from 'net'
 import os from 'os'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import { execSync } from 'child_process'
 import colors from 'picocolors'
 import { Plugin, loadEnv, UserConfig, ConfigEnv, ResolvedConfig, SSROptions, PluginOption, Rollup, createLogger } from 'vite'
 import fullReload, { Config as FullReloadConfig } from 'vite-plugin-full-reload'
@@ -14,9 +15,9 @@ interface PluginConfig {
     input: Rollup.InputOption
 
     /**
-     * Laravel's public directory.
+     * InertiaCore's public directory.
      *
-     * @default 'public'
+     * @default '../wwwroot'
      */
     publicDirectory?: string
 
@@ -55,19 +56,11 @@ interface PluginConfig {
     refresh?: boolean|string|string[]|RefreshConfig|RefreshConfig[]
 
     /**
-     * Utilise the Herd or Valet TLS certificates.
+     * Utilise the .NET Core certificates.
      *
      * @default null
      */
-    detectTls?: string|boolean|null,
-
-    /**
-     * Utilise the Herd or Valet TLS certificates.
-     *
-     * @default null
-     * @deprecated use "detectTls" instead
-     */
-    valetTls?: string|boolean|null,
+    detectTls?: string | boolean | null,
 
     /**
      * Transform the code while serving.
@@ -80,7 +73,7 @@ interface RefreshConfig {
     config?: FullReloadConfig,
 }
 
-interface LaravelPlugin extends Plugin {
+interface InertiaCorePlugin extends Plugin {
     config: (config: UserConfig, env: ConfigEnv) => UserConfig
 }
 
@@ -98,27 +91,27 @@ export const refreshPaths = [
 ].filter(path => fs.existsSync(path.replace(/\*\*$/, '')))
 
 const logger = createLogger('info', {
-    prefix: '[laravel-vite-plugin]'
+    prefix: '[inertiacore-vite-plugin]'
 })
 
 /**
- * Laravel plugin for Vite.
+ * InertiaCore plugin for Vite.
  *
  * @param config - A config object or relative path(s) of the scripts to be compiled.
  */
-export default function laravel(config: string|string[]|PluginConfig): [LaravelPlugin, ...Plugin[]]  {
+export default function inertiacore(config: string | string[] | PluginConfig): [InertiaCorePlugin, ...Plugin[]] {
     const pluginConfig = resolvePluginConfig(config)
 
     return [
-        resolveLaravelPlugin(pluginConfig),
+        resolveInertiaCorePlugin(pluginConfig),
         ...resolveFullReloadConfig(pluginConfig) as Plugin[],
     ];
 }
 
 /**
- * Resolve the Laravel Plugin configuration.
+ * Resolve the InertiaCore Plugin configuration.
  */
-function resolveLaravelPlugin(pluginConfig: Required<PluginConfig>): LaravelPlugin {
+function resolveInertiaCorePlugin(pluginConfig: Required<PluginConfig>): InertiaCorePlugin {
     let viteDevServerUrl: DevServerUrl
     let resolvedConfig: ResolvedConfig
     let userConfig: UserConfig
@@ -128,7 +121,7 @@ function resolveLaravelPlugin(pluginConfig: Required<PluginConfig>): LaravelPlug
     };
 
     return {
-        name: 'laravel',
+        name: 'inertiacore',
         enforce: 'post',
         config: (config, { command, mode }) => {
             userConfig = config
@@ -154,7 +147,7 @@ function resolveLaravelPlugin(pluginConfig: Required<PluginConfig>): LaravelPlug
                     assetsInlineLimit: userConfig.build?.assetsInlineLimit ?? 0,
                 },
                 server: {
-                    origin: userConfig.server?.origin ?? 'http://__laravel_vite_placeholder__.test',
+                    origin: userConfig.server?.origin ?? 'http://__inertiacore_vite_placeholder__.test',
                     cors: userConfig.server?.cors ?? {
                         origin: userConfig.server?.origin ?? [
                             /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/, // Copied from Vite itself. We can import this once we drop 5.0 support and require Vite 6.1+. Source: https://github.com/vitejs/vite/blob/0c854645bd17960abbe8f01b602d1a1da1a2b9fd/packages/vite/src/node/constants.ts#L200-L201
@@ -162,11 +155,6 @@ function resolveLaravelPlugin(pluginConfig: Required<PluginConfig>): LaravelPlug
                             /^https?:\/\/.*\.test(:\d+)?$/,                                         // Valet / Herd    (SCHEME://*.test:PORT)
                         ],
                     },
-                    ...(process.env.LARAVEL_SAIL ? {
-                        host: userConfig.server?.host ?? '0.0.0.0',
-                        port: userConfig.server?.port ?? (env.VITE_PORT ? parseInt(env.VITE_PORT) : 5173),
-                        strictPort: userConfig.server?.strictPort ?? true,
-                    } : undefined),
                     ...(serverConfig ? {
                         host: userConfig.server?.host ?? serverConfig.host,
                         hmr: userConfig.server?.hmr === false ? false : {
@@ -200,14 +188,15 @@ function resolveLaravelPlugin(pluginConfig: Required<PluginConfig>): LaravelPlug
         },
         transform(code) {
             if (resolvedConfig.command === 'serve') {
-                code = code.replace(/http:\/\/__laravel_vite_placeholder__\.test/g, viteDevServerUrl)
+                code = code.replace(/http:\/\/__inertiacore_vite_placeholder__\.test/g, viteDevServerUrl)
 
                 return pluginConfig.transformOnServe(code, viteDevServerUrl)
             }
         },
         configureServer(server) {
             const envDir = resolvedConfig.envDir || process.cwd()
-            const appUrl = loadEnv(resolvedConfig.mode, envDir, 'APP_URL').APP_URL ?? 'undefined'
+            const envAppUrl = loadEnv(resolvedConfig.mode, envDir, 'APP_URL').APP_URL
+            const appUrl = envAppUrl ?? getAppUrlFromAppSettings()
 
             server.httpServer?.once('listening', () => {
                 const address = server.httpServer?.address()
@@ -229,16 +218,22 @@ function resolveLaravelPlugin(pluginConfig: Required<PluginConfig>): LaravelPlug
                     fs.writeFileSync(pluginConfig.hotFile, `${viteDevServerUrl}${server.config.base.replace(/\/$/, '')}`)
 
                     setTimeout(() => {
-                        server.config.logger.info(`\n  ${colors.red(`${colors.bold('LARAVEL')} ${laravelVersion()}`)}  ${colors.dim('plugin')} ${colors.bold(`v${pluginVersion()}`)}`)
+                        const dotnetVer = dotnetVersion()
+                        const inertiaVer = inertiaCoreVersion()
+
+                        server.config.logger.info(`\n  ${colors.red(`${colors.bold('INERTIACORE')} ${inertiaVer ? `v${inertiaVer}` : ''}`)}  ${colors.dim('plugin')} ${colors.bold(`v${pluginVersion()}`)}`)
+                        if (dotnetVer) {
+                            server.config.logger.info(`  ${colors.green('➜')}  ${colors.bold('.NET')}: ${colors.cyan(dotnetVer)}`)
+                        }
                         server.config.logger.info('')
                         server.config.logger.info(`  ${colors.green('➜')}  ${colors.bold('APP_URL')}: ${colors.cyan(appUrl.replace(/:(\d+)/, (_, port) => `:${colors.bold(port)}`))}`)
 
                         if (typeof resolvedConfig.server.https === 'object' && typeof resolvedConfig.server.https.key === 'string') {
-                            if (resolvedConfig.server.https.key.startsWith(herdMacConfigPath()) || resolvedConfig.server.https.key.startsWith(herdWindowsConfigPath())) {
+                            if (resolvedConfig.server.https.key.startsWith(dotnetHttpsConfigPath())) {
+                                server.config.logger.info(`  ${colors.green('➜')}  Using .NET HTTPS certificate to secure Vite.`)
+                            } else if (resolvedConfig.server.https.key.startsWith(herdMacConfigPath()) || resolvedConfig.server.https.key.startsWith(herdWindowsConfigPath())) {
                                 server.config.logger.info(`  ${colors.green('➜')}  Using Herd certificate to secure Vite.`)
-                            }
-
-                            if (resolvedConfig.server.https.key.startsWith(valetMacConfigPath()) || resolvedConfig.server.https.key.startsWith(valetLinuxConfigPath())) {
+                            } else if (resolvedConfig.server.https.key.startsWith(valetMacConfigPath()) || resolvedConfig.server.https.key.startsWith(valetLinuxConfigPath())) {
                                 server.config.logger.info(`  ${colors.green('➜')}  Using Valet certificate to secure Vite.`)
                             }
                         }
@@ -279,43 +274,93 @@ function resolveLaravelPlugin(pluginConfig: Required<PluginConfig>): LaravelPlug
 /**
  * Validate the command can run in the given environment.
  */
-function ensureCommandShouldRunInEnvironment(command: 'build'|'serve', env: Record<string, string>): void {
-    if (command === 'build' || env.LARAVEL_BYPASS_ENV_CHECK === '1') {
+function ensureCommandShouldRunInEnvironment(command: 'build' | 'serve', env: Record<string, string>): void {
+    if (command === 'build' || env.INERTIACORE_BYPASS_ENV_CHECK === '1') {
         return;
     }
 
     if (typeof env.LARAVEL_VAPOR !== 'undefined') {
-        throw Error('You should not run the Vite HMR server on Vapor. You should build your assets for production instead. To disable this ENV check you may set LARAVEL_BYPASS_ENV_CHECK=1');
+        throw Error('You should not run the Vite HMR server on Vapor. You should build your assets for production instead. To disable this ENV check you may set INERTIACORE_BYPASS_ENV_CHECK=1');
     }
 
     if (typeof env.LARAVEL_FORGE !== 'undefined') {
-        throw Error('You should not run the Vite HMR server in your Forge deployment script. You should build your assets for production instead. To disable this ENV check you may set LARAVEL_BYPASS_ENV_CHECK=1');
+        throw Error('You should not run the Vite HMR server in your Forge deployment script. You should build your assets for production instead. To disable this ENV check you may set INERTIACORE_BYPASS_ENV_CHECK=1');
     }
 
     if (typeof env.LARAVEL_ENVOYER !== 'undefined') {
-        throw Error('You should not run the Vite HMR server in your Envoyer hook. You should build your assets for production instead. To disable this ENV check you may set LARAVEL_BYPASS_ENV_CHECK=1')
+        throw Error('You should not run the Vite HMR server in your Envoyer hook. You should build your assets for production instead. To disable this ENV check you may set INERTIACORE_BYPASS_ENV_CHECK=1')
     }
 
     if (typeof env.CI !== 'undefined') {
-        throw Error('You should not run the Vite HMR server in CI environments. You should build your assets for production instead. To disable this ENV check you may set LARAVEL_BYPASS_ENV_CHECK=1')
+        throw Error('You should not run the Vite HMR server in CI environments. You should build your assets for production instead. To disable this ENV check you may set INERTIACORE_BYPASS_ENV_CHECK=1')
     }
 }
 
 /**
- * The version of Laravel being run.
+ * The version of InertiaCore being run.
  */
-function laravelVersion(): string {
+function inertiaCoreVersion(): string {
     try {
-        const composer = JSON.parse(fs.readFileSync('composer.lock').toString())
+        const csprojFiles = fs.readdirSync('..').filter(file => file.endsWith('.csproj'))
 
-        return composer.packages?.find((composerPackage: {name: string}) => composerPackage.name === 'laravel/framework')?.version ?? ''
+        for (const file of csprojFiles) {
+            try {
+                const content = fs.readFileSync(path.join('..', file), 'utf8')
+
+                // Look for PackageReference to InertiaCorePreview (beta) first
+                const previewPackageRefMatch = content.match(/<PackageReference\s+Include="InertiaCorePreview"\s+Version="([^"]+)"/i)
+                if (previewPackageRefMatch) {
+                    logger.warn(`${colors.yellow('⚠')}  Using beta package ${colors.bold('InertiaCorePreview')} v${previewPackageRefMatch[1]}. Consider upgrading to the stable ${colors.bold('AspNetCore.InertiaCore')} package.`)
+                    return `${previewPackageRefMatch[1]} (beta)`
+                }
+
+                // Look for PackageReference to AspNetCore.InertiaCore
+                const packageRefMatch = content.match(/<PackageReference\s+Include="AspNetCore\.InertiaCore"\s+Version="([^"]+)"/i)
+                if (packageRefMatch) {
+                    return packageRefMatch[1]
+                }
+
+                // Look for ProjectReference to InertiaCore project and check its version
+                const projectRefMatch = content.match(/<ProjectReference\s+Include="[^"]*InertiaCore[^"]*\.csproj"/i)
+                if (projectRefMatch) {
+                    // Try to find the referenced project and get its version
+                    const referencedProjectPath = projectRefMatch[0].match(/Include="([^"]+)"/)?.[1]
+                    if (referencedProjectPath) {
+                        const fullPath = path.resolve('..', path.dirname(file), referencedProjectPath)
+                        if (fs.existsSync(fullPath)) {
+                            const referencedContent = fs.readFileSync(fullPath, 'utf8')
+                            const versionMatch = referencedContent.match(/<Version>([^<]+)<\/Version>/i)
+                            if (versionMatch) {
+                                return versionMatch[1]
+                            }
+                        }
+                    }
+                }
+            } catch {
+                continue
+            }
+        }
+
+        return ''
     } catch {
         return ''
     }
 }
 
 /**
- * The version of the Laravel Vite plugin being run.
+ * The version of .NET being run.
+ */
+function dotnetVersion(): string {
+    try {
+        const result = execSync('dotnet --version', { encoding: 'utf8', stdio: 'pipe' })
+        return result.trim()
+    } catch {
+        return ''
+    }
+}
+
+/**
+ * The version of the InertiaCore Vite plugin being run.
  */
 function pluginVersion(): string {
     try {
@@ -326,11 +371,49 @@ function pluginVersion(): string {
 }
 
 /**
+ * Get the application URL from appsettings files (local, development, then default).
+ */
+function getAppUrlFromAppSettings(): string {
+    const settingsFiles = [
+        '../appsettings.Local.json',
+        '../appsettings.Development.json',
+        '../appsettings.json'
+    ]
+
+    for (const settingsFile of settingsFiles) {
+        try {
+            if (fs.existsSync(settingsFile)) {
+                const content = JSON.parse(fs.readFileSync(settingsFile, 'utf8'))
+
+                // Check various possible locations for the URL
+                if (content.ApplicationUrl) {
+                    return content.ApplicationUrl
+                }
+                if (content.Kestrel?.Endpoints?.Http?.Url) {
+                    return content.Kestrel.Endpoints.Http.Url
+                }
+                if (content.Kestrel?.Endpoints?.Https?.Url) {
+                    return content.Kestrel.Endpoints.Https.Url
+                }
+                if (content.urls) {
+                    // urls can be a semicolon-separated string, take the first one
+                    return content.urls.split(';')[0]
+                }
+            }
+        } catch {
+            continue
+        }
+    }
+
+    return 'https://localhost:5001' // Default fallback
+}
+
+/**
  * Convert the users configuration into a standard structure with defaults.
  */
 function resolvePluginConfig(config: string|string[]|PluginConfig): Required<PluginConfig> {
     if (typeof config === 'undefined') {
-        throw new Error('laravel-vite-plugin: missing configuration.')
+        throw new Error('inertiacore-vite-plugin: missing configuration.')
     }
 
     if (typeof config === 'string' || Array.isArray(config)) {
@@ -338,14 +421,14 @@ function resolvePluginConfig(config: string|string[]|PluginConfig): Required<Plu
     }
 
     if (typeof config.input === 'undefined') {
-        throw new Error('laravel-vite-plugin: missing configuration for "input".')
+        throw new Error('inertiacore-vite-plugin: missing configuration for "input".')
     }
 
     if (typeof config.publicDirectory === 'string') {
         config.publicDirectory = config.publicDirectory.trim().replace(/^\/+/, '')
 
         if (config.publicDirectory === '') {
-            throw new Error('laravel-vite-plugin: publicDirectory must be a subdirectory. E.g. \'public\'.')
+            throw new Error('inertiacore-vite-plugin: publicDirectory must be a subdirectory. E.g. \'public\'.')
         }
     }
 
@@ -353,7 +436,7 @@ function resolvePluginConfig(config: string|string[]|PluginConfig): Required<Plu
         config.buildDirectory = config.buildDirectory.trim().replace(/^\/+/, '').replace(/\/+$/, '')
 
         if (config.buildDirectory === '') {
-            throw new Error('laravel-vite-plugin: buildDirectory must be a subdirectory. E.g. \'build\'.')
+            throw new Error('inertiacore-vite-plugin: buildDirectory must be a subdirectory. E.g. \'build\'.')
         }
     }
 
@@ -367,14 +450,13 @@ function resolvePluginConfig(config: string|string[]|PluginConfig): Required<Plu
 
     return {
         input: config.input,
-        publicDirectory: config.publicDirectory ?? 'public',
+        publicDirectory: config.publicDirectory ?? '../wwwroot',
         buildDirectory: config.buildDirectory ?? 'build',
         ssr: config.ssr ?? config.input,
         ssrOutputDirectory: config.ssrOutputDirectory ?? 'bootstrap/ssr',
         refresh: config.refresh ?? false,
-        hotFile: config.hotFile ?? path.join((config.publicDirectory ?? 'public'), 'hot'),
-        valetTls: config.valetTls ?? null,
-        detectTls: config.detectTls ?? config.valetTls ?? null,
+        hotFile: config.hotFile ?? path.join((config.publicDirectory ?? '../wwwroot'), 'hot'),
+        detectTls: config.detectTls ?? null,
         transformOnServe: config.transformOnServe ?? ((code) => code),
     }
 }
@@ -430,7 +512,7 @@ function resolveFullReloadConfig({ refresh: config }: Required<PluginConfig>): P
 
         /* eslint-disable-next-line @typescript-eslint/ban-ts-comment */
         /** @ts-ignore */
-        plugin.__laravel_plugin_config = c
+        plugin.__inertiacore_plugin_config = c
 
         return plugin
     })
@@ -474,8 +556,8 @@ function isIpv6(address: AddressInfo): boolean {
 function noExternalInertiaHelpers(config: UserConfig): true|Array<string|RegExp> {
     /* eslint-disable-next-line @typescript-eslint/ban-ts-comment */
     /* @ts-ignore */
-    const userNoExternal = (config.ssr as SSROptions|undefined)?.noExternal
-    const pluginNoExternal = ['laravel-vite-plugin']
+    const userNoExternal = (config.ssr as SSROptions | undefined)?.noExternal
+    const pluginNoExternal = ['inertiacore-vite-plugin']
 
     if (userNoExternal === true) {
         return true
@@ -536,6 +618,44 @@ function resolveHostFromEnv(env: Record<string, string>): string|undefined
 }
 
 /**
+ * Resolve .NET HTTPS server config for the given host.
+ */
+function resolveDotnetHttpsServerConfig(host: string|boolean|null): {
+    hmr?: { host: string }
+    host?: string,
+    https?: { cert: string, key: string }
+}|undefined {
+    if (host === false) {
+        return
+    }
+
+    const httpsConfigPath = dotnetHttpsConfigPath()
+    const certificateName = getDotnetCertificateName()
+
+    if (!fs.existsSync(httpsConfigPath)) {
+        return
+    }
+
+    const keyPath = path.resolve(httpsConfigPath, `${certificateName}.key`)
+    const certPath = path.resolve(httpsConfigPath, `${certificateName}.crt`)
+
+    if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+        return
+    }
+
+    const resolvedHost = typeof host === 'string' ? host : 'localhost'
+
+    return {
+        hmr: { host: resolvedHost },
+        host: resolvedHost,
+        https: {
+            key: keyPath,
+            cert: certPath,
+        },
+    }
+}
+
+/**
  * Resolve the Herd or Valet server config for the given host.
  */
 function resolveDevelopmentEnvironmentServerConfig(host: string|boolean|null): {
@@ -545,6 +665,12 @@ function resolveDevelopmentEnvironmentServerConfig(host: string|boolean|null): {
 }|undefined {
     if (host === false) {
         return
+    }
+
+    // Prioritize .NET HTTPS certificates first
+    const dotnetConfig = resolveDotnetHttpsServerConfig(host)
+    if (dotnetConfig) {
+        return dotnetConfig
     }
 
     const configPath = determineDevelopmentEnvironmentConfigPath();
@@ -657,4 +783,34 @@ function valetMacConfigPath(): string {
  */
 function valetLinuxConfigPath(): string {
     return path.resolve(os.homedir(), '.valet')
+}
+
+
+/**
+ * .NET HTTPS certificate configuration directory.
+ */
+function dotnetHttpsConfigPath(): string {
+    // Check for Windows APPDATA path first, then fallback to Unix-style home path
+    const baseFolder = process.env.APPDATA
+        ? path.resolve(process.env.APPDATA, 'ASP.NET', 'https')
+        : path.resolve(os.homedir(), '.aspnet', 'https')
+
+    return baseFolder
+}
+
+/**
+ * Get the certificate name for .NET HTTPS certificates.
+ */
+function getDotnetCertificateName(): string {
+    // Check command line arguments for --name parameter
+    const certificateArg = process.argv
+        .map(arg => arg.match(/--name=(.+)/i))
+        .filter(Boolean)[0]
+
+    if (certificateArg) {
+        return certificateArg[1]
+    }
+
+    // Fallback to npm package name or project directory name
+    return process.env.npm_package_name || path.basename(process.cwd())
 }
