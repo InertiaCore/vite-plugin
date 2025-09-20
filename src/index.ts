@@ -223,7 +223,7 @@ function resolveInertiaCorePlugin(pluginConfig: Required<PluginConfig>): Inertia
 
                         server.config.logger.info(`\n  ${colors.red(`${colors.bold('INERTIACORE')} ${inertiaVer.version ? `v${inertiaVer.version}` : ''}`)}  ${colors.dim('plugin')} ${colors.bold(`v${pluginVersion()}`)}`)
                         if (dotnetVer) {
-                            server.config.logger.info(`  ${colors.green('➜')}  ${colors.bold('.NET')}: ${colors.cyan(dotnetVer)}`)
+                            server.config.logger.info(`\n  ${colors.green('➜')}  ${colors.bold('.NET')}: ${colors.cyan(dotnetVer)}`)
                         }
                         server.config.logger.info('')
                         server.config.logger.info(`  ${colors.green('➜')}  ${colors.bold('APP_URL')}: ${colors.cyan(appUrl.replace(/:(\d+)/, (_, port) => `:${colors.bold(port)}`))}`)
@@ -356,8 +356,66 @@ function inertiaCoreVersion(): { version: string; isBeta: boolean } {
  */
 function dotnetVersion(): string {
     try {
+        // First, try to get the highest .NET version from csproj target frameworks
+        const csprojVersion = getHighestDotnetVersionFromCsproj()
+        if (csprojVersion) {
+            return csprojVersion
+        }
+
+        // Fallback to CLI version
         const result = execSync('dotnet --version', { encoding: 'utf8', stdio: 'pipe' })
         return result.trim()
+    } catch {
+        return ''
+    }
+}
+
+/**
+ * Get the highest .NET version from csproj target frameworks.
+ */
+function getHighestDotnetVersionFromCsproj(): string {
+    try {
+        const csprojFiles = fs.readdirSync('..').filter(file => file.endsWith('.csproj'))
+        const versions: number[] = []
+
+        for (const file of csprojFiles) {
+            try {
+                const content = fs.readFileSync(path.join('..', file), 'utf8')
+
+                // Look for single TargetFramework
+                const singleFrameworkMatch = content.match(/<TargetFramework>(net\d+\.\d+)<\/TargetFramework>/i)
+                if (singleFrameworkMatch) {
+                    const versionNum = parseFloat(singleFrameworkMatch[1].replace('net', ''))
+                    if (!isNaN(versionNum)) {
+                        versions.push(versionNum)
+                    }
+                }
+
+                // Look for multiple TargetFrameworks
+                const multiFrameworkMatch = content.match(/<TargetFrameworks>([^<]+)<\/TargetFrameworks>/i)
+                if (multiFrameworkMatch) {
+                    const frameworks = multiFrameworkMatch[1].split(';')
+                    for (const framework of frameworks) {
+                        const trimmed = framework.trim()
+                        if (trimmed.startsWith('net')) {
+                            const versionNum = parseFloat(trimmed.replace('net', ''))
+                            if (!isNaN(versionNum)) {
+                                versions.push(versionNum)
+                            }
+                        }
+                    }
+                }
+            } catch {
+                continue
+            }
+        }
+
+        if (versions.length > 0) {
+            const highestVersion = Math.max(...versions)
+            return highestVersion.toString()
+        }
+
+        return ''
     } catch {
         return ''
     }
