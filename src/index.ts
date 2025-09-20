@@ -221,7 +221,7 @@ function resolveInertiaCorePlugin(pluginConfig: Required<PluginConfig>): Inertia
                         const dotnetVer = dotnetVersion()
                         const inertiaVer = inertiaCoreVersion()
 
-                        server.config.logger.info(`\n  ${colors.red(`${colors.bold('INERTIACORE')} ${inertiaVer ? `v${inertiaVer}` : ''}`)}  ${colors.dim('plugin')} ${colors.bold(`v${pluginVersion()}`)}`)
+                        server.config.logger.info(`\n  ${colors.red(`${colors.bold('INERTIACORE')} ${inertiaVer.version ? `v${inertiaVer.version}` : ''}`)}  ${colors.dim('plugin')} ${colors.bold(`v${pluginVersion()}`)}`)
                         if (dotnetVer) {
                             server.config.logger.info(`  ${colors.green('➜')}  ${colors.bold('.NET')}: ${colors.cyan(dotnetVer)}`)
                         }
@@ -236,6 +236,11 @@ function resolveInertiaCorePlugin(pluginConfig: Required<PluginConfig>): Inertia
                             } else if (resolvedConfig.server.https.key.startsWith(valetMacConfigPath()) || resolvedConfig.server.https.key.startsWith(valetLinuxConfigPath())) {
                                 server.config.logger.info(`  ${colors.green('➜')}  Using Valet certificate to secure Vite.`)
                             }
+                        }
+
+                        if (inertiaVer.isBeta) {
+                            server.config.logger.warn('')
+                            server.config.logger.warn(`  ${colors.yellow('⚠')}  Using beta package ${colors.bold('InertiaCorePreview')} v${inertiaVer.version.replace(' (beta)', '')}. Consider upgrading to the stable ${colors.bold('AspNetCore.InertiaCore')} package.`)
                         }
                     }, 100)
                 }
@@ -299,7 +304,7 @@ function ensureCommandShouldRunInEnvironment(command: 'build' | 'serve', env: Re
 /**
  * The version of InertiaCore being run.
  */
-function inertiaCoreVersion(): string {
+function inertiaCoreVersion(): { version: string; isBeta: boolean } {
     try {
         const csprojFiles = fs.readdirSync('..').filter(file => file.endsWith('.csproj'))
 
@@ -310,14 +315,13 @@ function inertiaCoreVersion(): string {
                 // Look for PackageReference to InertiaCorePreview (beta) first
                 const previewPackageRefMatch = content.match(/<PackageReference\s+Include="InertiaCorePreview"\s+Version="([^"]+)"/i)
                 if (previewPackageRefMatch) {
-                    logger.warn(`${colors.yellow('⚠')}  Using beta package ${colors.bold('InertiaCorePreview')} v${previewPackageRefMatch[1]}. Consider upgrading to the stable ${colors.bold('AspNetCore.InertiaCore')} package.`)
-                    return `${previewPackageRefMatch[1]} (beta)`
+                    return { version: `${previewPackageRefMatch[1]} (beta)`, isBeta: true }
                 }
 
                 // Look for PackageReference to AspNetCore.InertiaCore
                 const packageRefMatch = content.match(/<PackageReference\s+Include="AspNetCore\.InertiaCore"\s+Version="([^"]+)"/i)
                 if (packageRefMatch) {
-                    return packageRefMatch[1]
+                    return { version: packageRefMatch[1], isBeta: false }
                 }
 
                 // Look for ProjectReference to InertiaCore project and check its version
@@ -331,7 +335,7 @@ function inertiaCoreVersion(): string {
                             const referencedContent = fs.readFileSync(fullPath, 'utf8')
                             const versionMatch = referencedContent.match(/<Version>([^<]+)<\/Version>/i)
                             if (versionMatch) {
-                                return versionMatch[1]
+                                return { version: versionMatch[1], isBeta: false }
                             }
                         }
                     }
@@ -341,9 +345,9 @@ function inertiaCoreVersion(): string {
             }
         }
 
-        return ''
+        return { version: '', isBeta: false }
     } catch {
-        return ''
+        return { version: '', isBeta: false }
     }
 }
 
