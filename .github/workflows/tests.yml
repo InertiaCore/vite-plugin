@@ -10,7 +10,7 @@ on:
     - cron: '0 0 * * *'
 
 env:
-  LARAVEL_BYPASS_ENV_CHECK: 1
+  INERTIACORE_BYPASS_ENV_CHECK: 1
 
 jobs:
   tests:
