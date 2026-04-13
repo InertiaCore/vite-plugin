@@ -4,6 +4,7 @@ import os from 'os'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import { execSync } from 'child_process'
+import { globSync } from 'tinyglobby'
 import colors from 'picocolors'
 import { Plugin, loadEnv, UserConfig, ConfigEnv, ResolvedConfig, SSROptions, PluginOption, Rollup, createLogger } from 'vite'
 import fullReload, { Config as FullReloadConfig } from 'vite-plugin-full-reload'
@@ -56,7 +57,10 @@ interface PluginConfig {
     refresh?: boolean|string|string[]|RefreshConfig|RefreshConfig[]
 
     /**
-     * Utilise the .NET Core certificates.
+     * Use the ASP.NET Core HTTPS development certificate to secure the Vite
+     * dev server. Pass `true` to auto-detect (and auto-export) the cert from
+     * `dotnet dev-certs https`, a string to use as the HMR host, or `false`
+     * to explicitly disable.
      *
      * @default null
      */
@@ -129,7 +133,7 @@ function resolveInertiaCorePlugin(pluginConfig: Required<PluginConfig>): Inertia
             const env = loadEnv(mode, userConfig.envDir || process.cwd(), '')
             const assetUrl = env.ASSET_URL ?? ''
             const serverConfig = command === 'serve'
-                ? (resolveDevelopmentEnvironmentServerConfig(pluginConfig.detectTls) ?? resolveEnvironmentServerConfig(env))
+                ? (resolveDotnetHttpsServerConfig(pluginConfig.detectTls) ?? resolveEnvironmentServerConfig(env))
                 : undefined
 
             ensureCommandShouldRunInEnvironment(command, env)
@@ -150,9 +154,8 @@ function resolveInertiaCorePlugin(pluginConfig: Required<PluginConfig>): Inertia
                     origin: userConfig.server?.origin ?? 'http://__inertiacore_vite_placeholder__.test',
                     cors: userConfig.server?.cors ?? {
                         origin: userConfig.server?.origin ?? [
-                            /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/, // Copied from Vite itself. We can import this once we drop 5.0 support and require Vite 6.1+. Source: https://github.com/vitejs/vite/blob/0c854645bd17960abbe8f01b602d1a1da1a2b9fd/packages/vite/src/node/constants.ts#L200-L201
+                            defaultAllowedOrigins,
                             ...(env.APP_URL ? [env.APP_URL] : []),                                  // *               (APP_URL="http://my-app.tld")
-                            /^https?:\/\/.*\.test(:\d+)?$/,                                         // Valet / Herd    (SCHEME://*.test:PORT)
                         ],
                     },
                     ...(serverConfig ? {
@@ -231,10 +234,6 @@ function resolveInertiaCorePlugin(pluginConfig: Required<PluginConfig>): Inertia
                         if (typeof resolvedConfig.server.https === 'object' && typeof resolvedConfig.server.https.key === 'string') {
                             if (resolvedConfig.server.https.key.startsWith(dotnetHttpsConfigPath())) {
                                 server.config.logger.info(`  ${colors.green('➜')}  Using .NET HTTPS certificate to secure Vite.`)
-                            } else if (resolvedConfig.server.https.key.startsWith(herdMacConfigPath()) || resolvedConfig.server.https.key.startsWith(herdWindowsConfigPath())) {
-                                server.config.logger.info(`  ${colors.green('➜')}  Using Herd certificate to secure Vite.`)
-                            } else if (resolvedConfig.server.https.key.startsWith(valetMacConfigPath()) || resolvedConfig.server.https.key.startsWith(valetLinuxConfigPath())) {
-                                server.config.logger.info(`  ${colors.green('➜')}  Using Valet certificate to secure Vite.`)
                             }
                         }
 
@@ -727,7 +726,10 @@ function resolveHostFromEnv(env: Record<string, string>): string|undefined
 }
 
 /**
- * Resolve .NET HTTPS server config for the given host.
+ * Resolve the ASP.NET Core HTTPS development certificate for the Vite dev
+ * server. When `host === false` this returns `undefined`. When `true` or a
+ * string, the cert is read from the standard .NET dev-certs directory and
+ * auto-exported via `dotnet dev-certs https` if missing.
  */
 function resolveDotnetHttpsServerConfig(host: string|boolean|null): {
     hmr?: { host: string }
@@ -742,11 +744,31 @@ function resolveDotnetHttpsServerConfig(host: string|boolean|null): {
     const certificateName = getDotnetCertificateName()
 
     if (!fs.existsSync(httpsConfigPath)) {
-        return
+        try {
+            fs.mkdirSync(httpsConfigPath, { recursive: true })
+        } catch {
+            return
+        }
     }
 
     const keyPath = path.resolve(httpsConfigPath, `${certificateName}.key`)
     const certPath = path.resolve(httpsConfigPath, `${certificateName}.crt`)
+
+    // If either file is missing, try to export the .NET dev cert as PEM.
+    if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+        if (host === null) {
+            return
+        }
+
+        try {
+            execSync(
+                `dotnet dev-certs https --export-path "${certPath}" --format Pem --no-password`,
+                { stdio: 'pipe' },
+            )
+        } catch {
+            return
+        }
+    }
 
     if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
         return
@@ -765,135 +787,11 @@ function resolveDotnetHttpsServerConfig(host: string|boolean|null): {
 }
 
 /**
- * Resolve the Herd or Valet server config for the given host.
- */
-function resolveDevelopmentEnvironmentServerConfig(host: string|boolean|null): {
-    hmr?: { host: string }
-    host?: string,
-    https?: { cert: string, key: string }
-}|undefined {
-    if (host === false) {
-        return
-    }
-
-    // Prioritize .NET HTTPS certificates first
-    const dotnetConfig = resolveDotnetHttpsServerConfig(host)
-    if (dotnetConfig) {
-        return dotnetConfig
-    }
-
-    const configPath = determineDevelopmentEnvironmentConfigPath();
-
-    if (typeof configPath === 'undefined' && host === null) {
-        return
-    }
-
-    if (typeof configPath === 'undefined') {
-        throw Error(`Unable to find the Herd or Valet configuration directory. Please check they are correctly installed.`)
-    }
-
-    const resolvedHost = host === true || host === null
-        ? path.basename(process.cwd()) + '.' + resolveDevelopmentEnvironmentTld(configPath)
-        : host
-
-    const keyPath = path.resolve(configPath, 'Certificates', `${resolvedHost}.key`)
-    const certPath = path.resolve(configPath, 'Certificates', `${resolvedHost}.crt`)
-
-    if (! fs.existsSync(keyPath) || ! fs.existsSync(certPath)) {
-        if (host === null) {
-            return
-        }
-
-        if (configPath === herdMacConfigPath() || configPath === herdWindowsConfigPath()) {
-            throw Error(`Unable to find certificate files for your host [${resolvedHost}] in the [${configPath}/Certificates] directory. Ensure you have secured the site via the Herd UI.`)
-        } else if (typeof host === 'string') {
-            throw Error(`Unable to find certificate files for your host [${resolvedHost}] in the [${configPath}/Certificates] directory. Ensure you have secured the site by running \`valet secure ${host}\`.`)
-        } else {
-            throw Error(`Unable to find certificate files for your host [${resolvedHost}] in the [${configPath}/Certificates] directory. Ensure you have secured the site by running \`valet secure\`.`)
-        }
-    }
-
-    return {
-        hmr: { host: resolvedHost },
-        host: resolvedHost,
-        https: {
-            key: keyPath,
-            cert: certPath,
-        },
-    }
-}
-
-/**
- * Resolve the path to the Herd or Valet configuration directory.
- */
-function determineDevelopmentEnvironmentConfigPath(): string|undefined {
-    if (fs.existsSync(herdMacConfigPath())) {
-        return herdMacConfigPath()
-    }
-
-    if (fs.existsSync(herdWindowsConfigPath())) {
-        return herdWindowsConfigPath()
-    }
-
-    if (fs.existsSync(valetMacConfigPath())) {
-        return valetMacConfigPath()
-    }
-
-    if (fs.existsSync(valetLinuxConfigPath())) {
-        return valetLinuxConfigPath()
-    }
-}
-
-/**
- * Resolve the TLD via the config path.
- */
-function resolveDevelopmentEnvironmentTld(configPath: string): string {
-    const configFile = path.resolve(configPath, 'config.json')
-
-    if (! fs.existsSync(configFile)) {
-        throw Error(`Unable to find the configuration file [${configFile}].`)
-    }
-
-    const config: { tld: string } = JSON.parse(fs.readFileSync(configFile, 'utf-8'))
-
-    return config.tld
-}
-
-/**
  * The directory of the current file.
  */
 function dirname(): string {
     return fileURLToPath(new URL('.', import.meta.url))
 }
-
-/**
- * Herd's Mac configuration directory.
- */
-function herdMacConfigPath(): string {
-    return path.resolve(os.homedir(), 'Library', 'Application Support', 'Herd', 'config', 'valet')
-}
-
-/**
- * Herd's Windows configuration directory.
- */
-function herdWindowsConfigPath(): string {
-    return path.resolve(os.homedir(), ".config", "herd", "config", "valet")
-}
-
-/**
- * Valet's Mac configuration directory.
- */
-function valetMacConfigPath(): string {
-    return path.resolve(os.homedir(), '.config', 'valet')
-}
-
-/**
- * Valet Linux's configuration directory.
- */
-function valetLinuxConfigPath(): string {
-    return path.resolve(os.homedir(), '.valet')
-}
-
 
 /**
  * .NET HTTPS certificate configuration directory.
