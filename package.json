@@ -1,6 +1,6 @@
 {
     "name": "@inertiacore/vite-plugin",
-    "version": "2.0.2",
+    "version": "2.0.3",
     "description": "InertiaCore plugin for Vite.",
     "keywords": [
         "inertiacore",
