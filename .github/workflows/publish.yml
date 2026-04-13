@@ -3,7 +3,11 @@ name: publish
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+
+permissions:
+  id-token: write # Required for OIDC
+  contents: read
 
 env:
   INERTIACORE_BYPASS_ENV_CHECK: 1
@@ -11,36 +15,18 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 24.x
-
-      - name: Upgrade npm (trusted publishing requires >= 11.5.1)
-        run: npm install -g npm@latest
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm test
-
-      - name: Build
-        run: npm run build
-
-      - name: Remove any generated .npmrc (avoid conflict with trusted publishing)
-        run: rm -f .npmrc ~/.npmrc
-
-      - name: Publish to npm
-        run: npm publish --provenance --access public
-
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      - run: npm run build --if-present
+      - run: npm test
+      - run: rm -f .npmrc ~/.npmrc
+      - run: npm publish
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
