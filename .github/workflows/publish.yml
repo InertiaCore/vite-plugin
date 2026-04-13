@@ -7,7 +7,7 @@ on:
 
 permissions:
   id-token: write # Required for OIDC
-  contents: read
+  contents: write # Required to create GitHub releases
 
 env:
   INERTIACORE_BYPASS_ENV_CHECK: 1
