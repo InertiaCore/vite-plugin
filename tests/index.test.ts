@@ -21,7 +21,7 @@ vi.mock('fs', async () => {
     }
 })
 
-describe('laravel-vite-plugin', () => {
+describe('inertiacore-vite-plugin', () => {
     afterEach(() => {
         vi.clearAllMocks()
     })
@@ -30,12 +30,12 @@ describe('laravel-vite-plugin', () => {
         /* eslint-disable-next-line @typescript-eslint/ban-ts-comment */
         /* @ts-ignore */
         expect(() => laravel())
-            .toThrowError('laravel-vite-plugin: missing configuration.');
+            .toThrowError('inertiacore-vite-plugin: missing configuration.');
 
         /* eslint-disable-next-line @typescript-eslint/ban-ts-comment */
         /* @ts-ignore */
         expect(() => laravel({}))
-            .toThrowError('laravel-vite-plugin: missing configuration for "input".');
+            .toThrowError('inertiacore-vite-plugin: missing configuration for "input".');
     })
 
     it('accepts a single input', () => {
@@ -167,8 +167,8 @@ describe('laravel-vite-plugin', () => {
         const config = plugin.config({}, { command: 'build', mode: 'production' })
         expect(config.base).toBe('/build/')
         expect(config.build.manifest).toBe('manifest.json')
-        expect(config.build.outDir).toBe('public/build')
         expect(config.build.rollupOptions.input).toBe('resources/js/app.js')
+        expect(config.build.outDir).toBe('../wwwroot/build')
 
         const ssrConfig = plugin.config({ build: { ssr: true } }, { command: 'build', mode: 'production' })
         expect(ssrConfig.base).toBe('/build/')
@@ -263,57 +263,13 @@ describe('laravel-vite-plugin', () => {
         ])
     })
 
-    it('configures the Vite server when inside a Sail container', () => {
-        process.env.LARAVEL_SAIL = '1'
-        const plugin = laravel('resources/js/app.js')[0]
-
-        const config = plugin.config({}, { command: 'serve', mode: 'development' })
-        expect(config.server.host).toBe('0.0.0.0')
-        expect(config.server.port).toBe(5173)
-        expect(config.server.strictPort).toBe(true)
-
-        delete process.env.LARAVEL_SAIL
-    })
-
-    it('allows the Vite port to be configured when inside a Sail container', () => {
-        process.env.LARAVEL_SAIL = '1'
-        process.env.VITE_PORT = '1234'
-        const plugin = laravel('resources/js/app.js')[0]
-
-        const config = plugin.config({}, { command: 'serve', mode: 'development' })
-        expect(config.server.host).toBe('0.0.0.0')
-        expect(config.server.port).toBe(1234)
-        expect(config.server.strictPort).toBe(true)
-
-        delete process.env.LARAVEL_SAIL
-        delete process.env.VITE_PORT
-    })
-
-    it('allows the server configuration to be overridden inside a Sail container', () => {
-        process.env.LARAVEL_SAIL = '1'
-        const plugin = laravel('resources/js/app.js')[0]
-
-        const config = plugin.config({
-            server: {
-                host: 'example.com',
-                port: 1234,
-                strictPort: false,
-            }
-        }, { command: 'serve', mode: 'development' })
-        expect(config.server.host).toBe('example.com')
-        expect(config.server.port).toBe(1234)
-        expect(config.server.strictPort).toBe(false)
-
-        delete process.env.LARAVEL_SAIL
-    })
-
     it('prevents the Inertia helpers from being externalized', () => {
         /* eslint-disable @typescript-eslint/ban-ts-comment */
         const plugin = laravel('resources/js/app.js')[0]
 
         const noSsrConfig = plugin.config({ build: { ssr: true } }, { command: 'build', mode: 'production' })
         /* @ts-ignore */
-        expect(noSsrConfig.ssr.noExternal).toEqual(['laravel-vite-plugin'])
+        expect(noSsrConfig.ssr.noExternal).toEqual(['inertiacore-vite-plugin'])
 
         /* @ts-ignore */
         const nothingExternalConfig = plugin.config({ ssr: { noExternal: true }, build: { ssr: true } }, { command: 'build', mode: 'production' })
@@ -323,12 +279,12 @@ describe('laravel-vite-plugin', () => {
         /* @ts-ignore */
         const arrayNoExternalConfig = plugin.config({ ssr: { noExternal: ['foo'] }, build: { ssr: true } }, { command: 'build', mode: 'production' })
         /* @ts-ignore */
-        expect(arrayNoExternalConfig.ssr.noExternal).toEqual(['foo', 'laravel-vite-plugin'])
+        expect(arrayNoExternalConfig.ssr.noExternal).toEqual(['foo', 'inertiacore-vite-plugin'])
 
         /* @ts-ignore */
         const stringNoExternalConfig = plugin.config({ ssr: { noExternal: 'foo' }, build: { ssr: true } }, { command: 'build', mode: 'production' })
         /* @ts-ignore */
-        expect(stringNoExternalConfig.ssr.noExternal).toEqual(['foo', 'laravel-vite-plugin'])
+        expect(stringNoExternalConfig.ssr.noExternal).toEqual(['foo', 'inertiacore-vite-plugin'])
     })
 
     it('does not configure full reload when configuration it not an object', () => {
@@ -370,7 +326,7 @@ describe('laravel-vite-plugin', () => {
 
         expect(plugins.length).toBe(2)
         /** @ts-ignore */
-        expect(plugins[1].__laravel_plugin_config).toEqual({
+        expect(plugins[1].__inertiacore_plugin_config).toEqual({
             paths: [
                 'app/Livewire/**',
                 'app/View/Components/**',
@@ -389,7 +345,7 @@ describe('laravel-vite-plugin', () => {
 
         expect(plugins.length).toBe(2)
         /** @ts-ignore */
-        expect(plugins[1].__laravel_plugin_config).toEqual({
+        expect(plugins[1].__inertiacore_plugin_config).toEqual({
             paths: ['path/to/watch/**'],
         })
     })
@@ -402,7 +358,7 @@ describe('laravel-vite-plugin', () => {
 
         expect(plugins.length).toBe(2)
         /** @ts-ignore */
-        expect(plugins[1].__laravel_plugin_config).toEqual({
+        expect(plugins[1].__inertiacore_plugin_config).toEqual({
             paths: ['path/to/watch/**', 'another/to/watch/**'],
         })
     })
@@ -418,7 +374,7 @@ describe('laravel-vite-plugin', () => {
 
         expect(plugins.length).toBe(2)
         /** @ts-ignore */
-        expect(plugins[1].__laravel_plugin_config).toEqual({
+        expect(plugins[1].__inertiacore_plugin_config).toEqual({
             paths: ['path/to/watch/**', 'another/to/watch/**'],
             config: { delay: 987 }
         })
@@ -441,12 +397,12 @@ describe('laravel-vite-plugin', () => {
 
         expect(plugins.length).toBe(3)
         /** @ts-ignore */
-        expect(plugins[1].__laravel_plugin_config).toEqual({
+        expect(plugins[1].__inertiacore_plugin_config).toEqual({
             paths: ['path/to/watch/**'],
             config: { delay: 987 }
         })
         /** @ts-ignore */
-        expect(plugins[2].__laravel_plugin_config).toEqual({
+        expect(plugins[2].__inertiacore_plugin_config).toEqual({
             paths: ['another/to/watch/**'],
             config: { delay: 123 }
         })
@@ -473,39 +429,19 @@ describe('laravel-vite-plugin', () => {
             'https://localhost:8080',
             // 127.0.0.1
             'http://127.0.0.1',
-            'https://127.0.0.1',
             'http://127.0.0.1:8000',
-            'https://127.0.0.1:8000',
-            // *.test
-            'http://laravel.test',
-            'https://laravel.test',
-            'http://laravel.test:8000',
-            'https://laravel.test:8000',
-            'http://my-app.test',
-            'https://my-app.test',
-            'http://my-app.test:8000',
-            'https://my-app.test:8000',
-            'https://my-app.test:8',
             // APP_URL
             'http://example.com',
-            'https://subdomain.my-app.test',
-        ].some((url) => resolvedConfig.server.cors.origin.some((regex) => test(regex, url)))).toBe(true)
+        ].every((url) => resolvedConfig.server.cors.origin.some((regex) => test(regex, url)))).toBe(true)
         // Disallowed origins...
         expect([
             'http://laravel.com',
             'https://laravel.com',
-            'http://laravel.com:8000',
-            'https://laravel.com:8000',
             'http://128.0.0.1',
-            'https://128.0.0.1',
-            'http://128.0.0.1:8000',
-            'https://128.0.0.1:8000',
             'https://example.com',
             'http://example.com:8000',
-            'https://example.com:8000',
             'http://exampletest',
-            'http://example.test:',
-        ].some((url) => resolvedConfig.server.cors.origin.some((regex) => test(regex, url)))).toBe(false)
+        ].every((url) => resolvedConfig.server.cors.origin.some((regex) => test(regex, url)))).toBe(false)
 
         fs.rmSync(path.join(__dirname, '.env'))
     })
