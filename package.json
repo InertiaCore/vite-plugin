@@ -10,7 +10,7 @@
     "homepage": "https://github.com/inertiacore/vite-plugin",
     "repository": {
         "type": "git",
-        "url": "https://github.com/inertiacore/vite-plugin"
+        "url": "git+https://github.com/inertiacore/vite-plugin.git"
     },
     "license": "MIT",
     "author": "InertiaCore",
