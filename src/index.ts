@@ -70,6 +70,17 @@ interface PluginConfig {
      * Transform the code while serving.
      */
     transformOnServe?: (code: string, url: DevServerUrl) => string,
+
+    /**
+     * Asset file glob patterns to include in the build.
+     *
+     * Files matching these patterns will be processed and versioned by Vite,
+     * even if they are not imported in your JavaScript. Useful for static
+     * assets referenced from Razor views or other server-rendered markup.
+     *
+     * @default []
+     */
+    assets?: string | string[]
 }
 
 interface RefreshConfig {
@@ -81,7 +92,7 @@ interface InertiaCorePlugin extends Plugin {
     config: (config: UserConfig, env: ConfigEnv) => UserConfig
 }
 
-type DevServerUrl = `${'http'|'https'}://${string}:${number}`
+type DevServerUrl = `${'http' | 'https'}://${string}:${number}`
 
 let exitHandlersBound = false
 
@@ -108,6 +119,7 @@ export default function inertiacore(config: string | string[] | PluginConfig): [
 
     return [
         resolveInertiaCorePlugin(pluginConfig),
+        ...resolveAssetPlugin(pluginConfig.assets),
         ...resolveFullReloadConfig(pluginConfig) as Plugin[],
     ];
 }
@@ -568,6 +580,7 @@ function resolvePluginConfig(config: string|string[]|PluginConfig): Required<Plu
         hotFile: config.hotFile ?? path.join((config.publicDirectory ?? '../wwwroot'), 'hot'),
         detectTls: config.detectTls ?? null,
         transformOnServe: config.transformOnServe ?? ((code) => code),
+        assets: typeof config.assets === 'string' ? [config.assets] : config.assets ?? [],
     }
 }
 
@@ -600,7 +613,33 @@ function resolveOutDir(config: Required<PluginConfig>, ssr: boolean): string|und
     return path.join(config.publicDirectory, config.buildDirectory)
 }
 
-function resolveFullReloadConfig({ refresh: config }: Required<PluginConfig>): PluginOption[]{
+/**
+ * Resolve the asset-emitting plugin from the configuration.
+ */
+function resolveAssetPlugin(assets: string | string[]): Plugin[] {
+    if (assets.length === 0) {
+        return []
+    }
+
+    return [{
+        name: 'inertiacore:assets',
+        apply: 'build',
+        buildStart() {
+            for (const file of globSync(assets)) {
+                if (fs.statSync(file).isFile()) {
+                    this.emitFile({
+                        type: 'asset',
+                        name: path.basename(file),
+                        originalFileName: file,
+                        source: fs.readFileSync(file),
+                    })
+                }
+            }
+        },
+    }]
+}
+
+function resolveFullReloadConfig({ refresh: config }: Required<PluginConfig>): PluginOption[] {
     if (typeof config === 'boolean') {
         return [];
     }

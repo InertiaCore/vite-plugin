@@ -462,6 +462,40 @@ describe('inertiacore-vite-plugin', () => {
 
         expect(resolvedConfig.server.cors).toBe(true)
     })
+
+    it('does not include assets plugin when no assets are configured', () => {
+        const plugins = laravel('resources/js/app.ts')
+
+        expect(plugins.find(plugin => plugin.name === 'inertiacore:assets')).toBeUndefined()
+    })
+
+    it('emits assets as static assets when assets is a string', () => {
+        const plugins = laravel({
+            input: 'resources/js/app.ts',
+            assets: 'tests/__data__/*.png',
+        })
+
+        const assetsPlugin = plugins.find(plugin => plugin.name === 'inertiacore:assets')!
+        const emitFile = vi.fn()
+
+        assetsPlugin.buildStart!.call({ emitFile })
+
+        expect(emitFile).toHaveBeenCalledWith({ type: 'asset', name: 'dummy.png', originalFileName: expect.stringContaining('dummy.png'), source: expect.any(Buffer) })
+    })
+
+    it('emits assets as static assets when assets is an array', () => {
+        const plugins = laravel({
+            input: 'resources/js/app.ts',
+            assets: ['tests/__data__/*.png'],
+        })
+
+        const assetsPlugin = plugins.find(plugin => plugin.name === 'inertiacore:assets')!
+        const emitFile = vi.fn()
+
+        assetsPlugin.buildStart!.call({ emitFile })
+
+        expect(emitFile).toHaveBeenCalledWith({ type: 'asset', name: 'dummy.png', originalFileName: expect.stringContaining('dummy.png'), source: expect.any(Buffer) })
+    })
 })
 
 describe('inertia-helpers', () => {
